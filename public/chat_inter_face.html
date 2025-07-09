@@ -130,21 +130,19 @@ Always respond with clearly formatted, structured information.
       messages.push({ role: "user", content: input });
 
       try {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        const response = await fetch("http://localhost:3000/api/chat", {
           method: "POST",
           headers: {
-            "Authorization": "Bearer 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",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://yourdomain.com", // optional
-            "X-Title": "Scholarship Chatbot"
+            "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            model: "meta-llama/llama-3-8b-instruct",
+            model: "accounts/fireworks/models/deepseek-r1",
             messages: messages
           })
         });
 
         const data = await response.json();
+        console.log("Backend response:", data); // Add this line
         const reply = data.choices?.[0]?.message?.content || "Sorry, I couldn't fetch a response.";
         addMessage("ScholarBot", reply);
       } catch (error) {
