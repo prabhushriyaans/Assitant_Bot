@@ -1,2 +1,4 @@
 .env
 /backend/node_modules
+backend/contacts.json
+public/face_two.jsx
