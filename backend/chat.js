@@ -5,6 +5,7 @@ import cors from 'cors';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import Mercury from '@postlight/parser';
 
 dotenv.config();
 
@@ -12,7 +13,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔹 AI Chat Endpoint
+/* ===========================
+   🔹 AI Chat Endpoint
+   =========================== */
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages, model } = req.body;
@@ -37,7 +40,117 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// 🔹 Command & WhatsApp Desktop Messaging Endpoint
+/* ===========================
+   🔹 Enhanced News API Endpoint
+   =========================== */
+app.get('/api/news', async (req, res) => {
+  const { type } = req.query;
+
+  const endpoints = {
+    tesla: `https://newsapi.org/v2/everything?q=tesla&sortBy=publishedAt&apiKey=${process.env.NEWS_API_KEY}`,
+    apple: `https://newsapi.org/v2/everything?q=apple&sortBy=publishedAt&apiKey=${process.env.NEWS_API_KEY}`,
+    business: `https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey=${process.env.NEWS_API_KEY}`,
+    techcrunch: `https://newsapi.org/v2/top-headlines?sources=techcrunch&apiKey=${process.env.NEWS_API_KEY}`,
+    wsj: `https://newsapi.org/v2/everything?domains=wsj.com&apiKey=${process.env.NEWS_API_KEY}`,
+    football: `https://newsapi.org/v2/everything?q=football&sortBy=publishedAt&apiKey=${process.env.NEWS_API_KEY}`,
+    sports: `https://newsapi.org/v2/top-headlines?category=sports&country=us&apiKey=${process.env.NEWS_API_KEY}`,
+    education: `https://newsapi.org/v2/everything?q=education&sortBy=publishedAt&apiKey=${process.env.NEWS_API_KEY}`,
+    culturalfest: `https://newsapi.org/v2/everything?q=cultural%20fest&sortBy=publishedAt&apiKey=${process.env.NEWS_API_KEY}`,
+    science: `https://newsapi.org/v2/top-headlines?category=science&country=us&apiKey=${process.env.NEWS_API_KEY}`,
+    health: `https://newsapi.org/v2/top-headlines?category=health&country=us&apiKey=${process.env.NEWS_API_KEY}`,
+    entertainment: `https://newsapi.org/v2/top-headlines?category=entertainment&country=us&apiKey=${process.env.NEWS_API_KEY}`,
+    technology: `https://newsapi.org/v2/top-headlines?category=technology&country=us&apiKey=${process.env.NEWS_API_KEY}`,
+    general: `https://newsapi.org/v2/top-headlines?country=us&apiKey=${process.env.NEWS_API_KEY}`
+  };
+
+  const url = type && endpoints[type.toLowerCase()] ? endpoints[type.toLowerCase()] : endpoints.general;
+
+  try {
+    const newsRes = await fetch(url);
+    const newsData = await newsRes.json();
+
+    if (!newsData.articles || newsData.articles.length === 0) {
+      return res.json({ message: `📰 No ${type || 'general'} news found at the moment.` });
+    }
+
+    const topArticles = newsData.articles.slice(0, 3).map((a, i) => {
+      return `🔹 ${i + 1}. ${a.title}\n🗞️ ${a.source.name}\n🔗 ${a.url}`;
+    }).join('\n\n');
+
+    res.json({ message: `📰 Here are the latest ${type || 'general'} news articles:\n\n${topArticles}` });
+  } catch (err) {
+    console.error(`News fetch failed for ${type}:`, err);
+    res.status(500).json({ message: `⚠️ Failed to fetch ${type || 'general'} news.` });
+  }
+});
+
+/* ===========================
+   🔹 Website Summarisation Endpoint
+   =========================== */
+app.post('/api/summarise', async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ message: "❌ URL is required." });
+
+  try {
+    const result = await Mercury.parse(url);
+
+    if (!result || !result.content) {
+      return res.json({ message: "⚠️ Could not extract content from this website." });
+    }
+
+    const textContent = result.content.replace(/<[^>]*>?/gm, ''); // Strip HTML tags
+
+    // Summarise using your AI endpoint
+    const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.HF_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: "deepseek/deepseek-r1:free",
+        messages: [
+          { role: "system", content: "Summarise the following content in clear, concise points for an educated reader:" },
+          { role: "user", content: textContent }
+        ]
+      })
+    });
+
+    const data = await aiResponse.json();
+    const summary = data.choices?.[0]?.message?.content || "⚠️ Could not summarise the content.";
+
+    res.json({ message: summary });
+
+  } catch (err) {
+    console.error("Summarisation error:", err);
+    res.status(500).json({ message: "⚠️ Failed to summarise the website content." });
+  }
+});
+
+/* ===========================
+   🔹 Current Facts API Endpoint
+   =========================== */
+app.get('/api/currentfacts', async (req, res) => {
+  const { topic } = req.query;
+
+  if (topic === 'us_president') {
+    return res.json({
+      message: "🇺🇸 As of July 2025, the President of the United States is Joe Biden."
+    });
+  }
+
+  if (topic === 'india_pm') {
+    return res.json({
+      message: "🇮🇳 As of July 2025, the Prime Minister of India is Narendra Modi."
+    });
+  }
+
+  return res.json({ message: `⚠️ No data available for "${topic}".` });
+});
+
+/* ===========================
+   🔹 Command Endpoint
+   =========================== */
 app.post('/api/command', (req, res) => {
   const { query } = req.body;
   const lower = query.toLowerCase();
@@ -79,7 +192,6 @@ app.post('/api/command', (req, res) => {
     }
   }
 
-  // ✅ --- CONTACT MEMORY SECTION ---
   const contactsPath = path.join('./contacts.json');
 
   function loadContacts() {
@@ -91,7 +203,6 @@ app.post('/api/command', (req, res) => {
     fs.writeFileSync(contactsPath, JSON.stringify(contacts, null, 2));
   }
 
-  // 🔸 Match: "send the text message 'hi' to number +91..."
   const sendMsgMatch = lower.match(/send\s+the\s+text\s+message\s+"([^"]+)"\s+to\s+number\s+((?:\+?\d[\d\s\-().]*){10,})/i);
   if (sendMsgMatch) {
     const message = encodeURIComponent(sendMsgMatch[1].trim());
@@ -112,7 +223,6 @@ app.post('/api/command', (req, res) => {
     return;
   }
 
-  // 🔸 Match: "call +919876543210" or "open +919..."
   const phoneMatch = lower.match(/(?:^|\s)(?:open|call)\s+((?:\+?\d[\d\s\-().]*){10,})/i);
   if (phoneMatch) {
     let number = phoneMatch[1].replace(/\D/g, '');
@@ -132,7 +242,6 @@ app.post('/api/command', (req, res) => {
     return;
   }
 
-  // 🔹 NEW: Match "call ravi +91..." — learn contact
   const learnMatch = lower.match(/(?:call|message)\s+(\w+)\s+(\+91\d{10})/i);
   if (learnMatch) {
     const [, name, number] = learnMatch;
@@ -153,7 +262,6 @@ app.post('/api/command', (req, res) => {
     return;
   }
 
-  // 🔹 Match "call ravi" — use stored contact
   const recallMatch = lower.match(/(?:call|message)\s+(\w+)/i);
   if (recallMatch) {
     const [, name] = recallMatch;
@@ -178,7 +286,6 @@ app.post('/api/command', (req, res) => {
     return;
   }
 
-  // 🔹 NEW: Match "remove ravi" — delete stored contact
   const removeMatch = lower.match(/remove\s+(\w+)/i);
   if (removeMatch) {
     const name = removeMatch[1].toLowerCase();
@@ -192,9 +299,10 @@ app.post('/api/command', (req, res) => {
     }
   }
 
-  // 🔹 Fallback
   res.json({ message: "❌ Unknown command." });
 });
 
-// 🔹 Start Server
+/* ===========================
+   🔹 Start Server
+   =========================== */
 app.listen(3000, () => console.log('🚀 Server running on port 3000'));

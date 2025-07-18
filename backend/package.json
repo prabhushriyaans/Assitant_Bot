@@ -9,11 +9,14 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@postlight/parser": "^2.2.3",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
-    "node-fetch": "^3.3.2"
+    "jsdom": "^26.1.0",
+    "node-fetch": "^3.3.2",
+    "rss-parser": "^3.13.0"
   },
   "description": ""
 }

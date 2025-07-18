@@ -25,7 +25,6 @@
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.1); }
     }
-    /* Loader spinner */
     .loader {
       border: 4px solid #e5e7eb;
       border-top: 4px solid #6366f1;
@@ -75,6 +74,7 @@
     </form>
     <div id="loader" class="hidden mt-4"><div class="loader"></div></div>
   </div>
+
   <script>
     const chatBox = document.getElementById("chatBox");
     const chatForm = document.getElementById("chatForm");
@@ -91,7 +91,6 @@
       }
     ];
 
-    // Safely escape HTML special characters to prevent XSS
     function escapeHTML(text) {
       return text.replace(/[&<>"']/g, (char) =>
         ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])
@@ -144,7 +143,6 @@
       });
     }
 
-    // Manual voice output on user click
     readAloudBtn.addEventListener("click", () => {
       const botMessages = [...chatBox.querySelectorAll("div.justify-start strong")];
       const lastMsg = botMessages.length > 0 ? botMessages[botMessages.length - 1].parentElement : null;
@@ -154,7 +152,6 @@
       }
     });
 
-    // Voice Input
     voiceBtn.addEventListener("click", () => {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
@@ -187,14 +184,12 @@
         }
         addMessage("ChatBot", errorMsg);
       };
-      recognition.onend = () => {};
     });
 
     window.addEventListener("DOMContentLoaded", () => {
       const greeting = "🧠 Hello. I am your problem-solving assistant. How may I assist you today?";
       addMessage("ChatBot", greeting);
       chatHistory.push({ role: "assistant", content: greeting });
-      // speak(greeting); // Disabled auto-voice
     });
 
     chatForm.addEventListener("submit", async (e) => {
@@ -206,7 +201,30 @@
       chatHistory.push({ role: "user", content: input });
       showLoader(true);
       toggleSendButton(true);
-      // Try command endpoint first
+
+      // 🔹 General News detection
+      if (/news/i.test(input)) {
+        try {
+          let typeMatch = input.match(/tesla|apple|business|techcrunch|wsj/i);
+          let type = typeMatch ? typeMatch[0].toLowerCase() : 'general';
+
+          const newsResponse = await fetch(`http://localhost:3000/api/news?type=${type}`);
+          const newsData = await newsResponse.json();
+          chatHistory.push({ role: "assistant", content: newsData.message });
+          addMessage("ChatBot", newsData.message);
+          showLoader(false);
+          toggleSendButton(false);
+          return;
+        } catch (error) {
+          console.error("News Error:", error);
+          addMessage("ChatBot", "⚠️ Could not retrieve news.");
+          showLoader(false);
+          toggleSendButton(false);
+          return;
+        }
+      }
+
+      // 🔹 Continue with command endpoint
       try {
         const commandResponse = await fetch("http://localhost:3000/api/command", {
           method: "POST",
@@ -219,13 +237,13 @@
           addMessage("ChatBot", cmdResult.message);
           showLoader(false);
           toggleSendButton(false);
-          // speak(cmdResult.message);
           return;
         }
       } catch (error) {
         console.error("Command Error:", error);
       }
-      // Fallback to chat endpoint
+
+      // 🔹 Fallback to AI chat
       try {
         const response = await fetch("http://localhost:3000/api/chat", {
           method: "POST",
@@ -236,23 +254,21 @@
         const reply = data.choices?.[0]?.message?.content || "Sorry, I couldn't fetch a response.";
         chatHistory.push({ role: "assistant", content: reply });
         addMessage("ChatBot", reply);
-        // speak(reply);
       } catch (error) {
         console.error("Error:", error);
         addMessage("ChatBot", "⚠️ Something went wrong. Please check your server or connection. Try again later.");
       }
+
       showLoader(false);
       toggleSendButton(false);
     });
 
-    // Allow pressing Enter to send message
     userInput.addEventListener("keydown", function(e) {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         chatForm.dispatchEvent(new Event('submit'));
       }
     });
-
   </script>
 </body>
 </html>
