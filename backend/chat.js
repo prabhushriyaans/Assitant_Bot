@@ -5,7 +5,7 @@ import cors from 'cors';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import Mercury from '@postlight/parser';
+// import Mercury from '@postlight/parser'; // Not used in the provided code, consider removing if not needed.
 
 dotenv.config();
 
@@ -18,27 +18,109 @@ app.use(express.json());
    =========================== */
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages, model } = req.body;
+    const { messages, model: rawModel } = req.body; // Capture the raw model string
+    const model = rawModel ? rawModel.trim() : ''; // Trim any whitespace
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
+    console.log(`[DEBUG] Raw model string received: "${rawModel}"`);
+    console.log(`[DEBUG] Trimmed model string: "${model}"`);
+    console.log(`[DEBUG] Does trimmed model start with "google/"? ${model.startsWith("google/")}`);
+    console.log(`[DEBUG] Does trimmed model start with "deepseek/"? ${model.startsWith("deepseek/")}`);
+
+
+    let apiUrl, headers, body;
+
+    // Determine which AI model to use based on the 'model' parameter from the frontend
+    if (model.startsWith("google/")) {
+        console.log(`[DEBUG] Routing to Google Gemini API for model: ${model}`);
+        const geminiModel = model.replace("google/", ""); // Extracts model name like 'gemini-2.0-flash'
+
+        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+        headers = {
+            'Content-Type': 'application/json'
+        };
+
+        const geminiContents = [];
+        let systemPrompt = "";
+
+        for (const msg of messages) {
+            if (msg.role === 'system') {
+                systemPrompt = msg.content;
+            } else if (msg.role === 'user') {
+                if (systemPrompt && geminiContents.length === 0) {
+                    geminiContents.push({
+                        role: 'user',
+                        parts: [{ text: systemPrompt + "\n\n" + msg.content }]
+                    });
+                    systemPrompt = "";
+                } else {
+                    geminiContents.push({
+                        role: 'user',
+                        parts: [{ text: msg.content }]
+                    });
+                }
+            } else if (msg.role === 'assistant') {
+                geminiContents.push({
+                    role: 'model',
+                    parts: [{ text: msg.content }]
+                });
+            }
+        }
+
+        body = JSON.stringify({
+            contents: geminiContents
+        });
+    }
+    else if (model.startsWith("deepseek/")) {
+      console.log(`[DEBUG] Routing to DeepSeek (OpenRouter) API for model: ${model}`);
+      apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
+      headers = {
         'Authorization': `Bearer ${process.env.HF_API_KEY}`,
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: model || "deepseek/deepseek-r1:free",
+      };
+      body = JSON.stringify({
+        model: model, // Use the exact model string from the frontend
         messages
-      })
-    });
+      });
+    }
+    else {
+      console.warn(`[DEBUG] Unexpected model received: "${model}". Defaulting to DeepSeek.`);
+      apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
+      headers = {
+        'Authorization': `Bearer ${process.env.HF_API_KEY}`,
+        'Content-Type': 'application/json'
+      };
+      body = JSON.stringify({
+        model: "deepseek/deepseek-r1:free", // Explicitly set fallback model
+        messages
+      });
+    }
+
+    const response = await fetch(apiUrl, { method: 'POST', headers, body });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText || 'Unknown error during API call' }));
+        console.error("API call failed with status:", response.status, "Error details:", errorData);
+        return res.status(response.status).json({ error: `API call failed: ${errorData.error?.message || errorData.message || JSON.stringify(errorData)}` });
+    }
 
     const data = await response.json();
-    res.json(data);
+
+    if (model.startsWith("google/")) {
+        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts.length > 0) {
+            res.json({ choices: [{ message: { content: data.candidates[0].content.parts[0].text } }] });
+        } else {
+            console.error("Invalid Gemini API response format or no candidates in response:", data);
+            res.status(500).json({ error: 'Invalid Gemini API response format or no response from model.', details: data });
+        }
+    } else {
+        res.json(data);
+    }
   } catch (err) {
-    console.error("API call failed:", err);
-    res.status(500).json({ error: 'API call failed' });
+    console.error("Caught an exception during API call:", err);
+    res.status(500).json({ error: 'API call failed due to server error.' });
   }
 });
+
 
 /* ===========================
    🔹 Enhanced News API Endpoint
@@ -85,54 +167,12 @@ app.get('/api/news', async (req, res) => {
 });
 
 /* ===========================
-   🔹 Website Summarisation Endpoint
-   =========================== */
-app.post('/api/summarise', async (req, res) => {
-  const { url } = req.body;
-  if (!url) return res.status(400).json({ message: "❌ URL is required." });
-
-  try {
-    const result = await Mercury.parse(url);
-
-    if (!result || !result.content) {
-      return res.json({ message: "⚠️ Could not extract content from this website." });
-    }
-
-    const textContent = result.content.replace(/<[^>]*>?/gm, ''); // Strip HTML tags
-
-    // Summarise using your AI endpoint
-    const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.HF_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: "deepseek/deepseek-r1:free",
-        messages: [
-          { role: "system", content: "Summarise the following content in clear, concise points for an educated reader:" },
-          { role: "user", content: textContent }
-        ]
-      })
-    });
-
-    const data = await aiResponse.json();
-    const summary = data.choices?.[0]?.message?.content || "⚠️ Could not summarise the content.";
-
-    res.json({ message: summary });
-
-  } catch (err) {
-    console.error("Summarisation error:", err);
-    res.status(500).json({ message: "⚠️ Failed to summarise the website content." });
-  }
-});
-
-/* ===========================
    🔹 Current Facts API Endpoint
    =========================== */
 app.get('/api/currentfacts', async (req, res) => {
   const { topic } = req.query;
 
+  // Simulate current facts, date-sensitive responses would require external APIs
   if (topic === 'us_president') {
     return res.json({
       message: "🇺🇸 As of July 2025, the President of the United States is Joe Biden."
